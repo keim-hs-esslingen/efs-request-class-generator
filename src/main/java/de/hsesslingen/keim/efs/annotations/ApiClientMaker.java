@@ -29,16 +29,19 @@ import com.squareup.javapoet.MethodSpec;
 import com.squareup.javapoet.ParameterizedTypeName;
 import com.squareup.javapoet.TypeName;
 import com.squareup.javapoet.TypeSpec;
+import de.hsesslingen.keim.efs.annotations.ParameterScope.Kind;
 import static de.hsesslingen.keim.efs.annotations.Utils.*;
 import de.hsesslingen.keim.efs.mobility.requests.MiddlewareRequest;
 import java.io.IOException;
 import java.io.Writer;
+import static java.lang.String.format;
 import java.lang.annotation.Annotation;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import static java.util.stream.Collectors.toList;
 import javax.annotation.processing.AbstractProcessor;
 import javax.annotation.processing.Filer;
 import javax.annotation.processing.RoundEnvironment;
@@ -54,10 +57,14 @@ import javax.tools.JavaFileObject;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
+import org.springframework.web.bind.annotation.RequestParam;
 
 /**
  *
@@ -75,39 +82,21 @@ import org.springframework.web.bind.annotation.RequestMethod;
 @SupportedSourceVersion(SourceVersion.RELEASE_14)
 public class ApiClientMaker extends AbstractProcessor {
 
-    private Map<String, ApiScope> apis = new HashMap<>();
-
     @Override
     public boolean process(Set<? extends TypeElement> annotations, RoundEnvironment roundEnv) {
 
+        var apis = new HashMap<String, ApiScope>();
+
         // First read and collect the api scopes together with its endpoint scopes...
-        for (TypeElement anTypeEl : annotations) {
-            for (Element el : roundEnv.getElementsAnnotatedWith(anTypeEl)) {
-                if (el == null || !(el instanceof ExecutableElement)) {
-                    // Skip TypeElements as we only want the method elements.
-                    // We need this check because @RequestMapping is also allowed to be on Types.
-                    continue;
-                }
-
-                var exEl = (ExecutableElement) el;
-
-                // Get class of this method.
-                var parentEl = anTypeEl.getEnclosingElement();
-
-                if (!(parentEl instanceof TypeElement)) {
-                    // If this is not a type element we skip this element.
-                    // TODO: Log warning.
-                    continue;
-                }
-
-                var api = getOrCreateApiScope((TypeElement) parentEl);
-
-                var anInstance = el.getAnnotation((Class<? extends Annotation>) anTypeEl.getClass());
-                var ep = createEnpointScope(anInstance, exEl);
-
-                api.getEndpoints().add(ep);
-            }
-        }
+        annotations.stream()
+                .flatMap(a -> roundEnv.getElementsAnnotatedWith(a).stream())
+                .filter(el -> el != null && el instanceof ExecutableElement && el.getEnclosingElement() instanceof TypeElement)
+                .map(el -> (ExecutableElement) el)
+                .forEach(ex -> {
+                    var api = getOrCreateApiScope(apis, (TypeElement) ex.getEnclosingElement());
+                    var ep = createEnpointScope(ex);
+                    api.getEndpoints().add(ep);
+                });
 
         for (var api : apis.values()) {
             try {
@@ -129,7 +118,7 @@ public class ApiClientMaker extends AbstractProcessor {
      * @param typeEl
      * @return
      */
-    private ApiScope getOrCreateApiScope(TypeElement typeEl) {
+    private ApiScope getOrCreateApiScope(Map<String, ApiScope> apis, TypeElement typeEl) {
         var name = typeEl.getSimpleName().toString();
 
         if (apis.containsKey(name)) {
@@ -156,44 +145,99 @@ public class ApiClientMaker extends AbstractProcessor {
      * @param javaMethod
      * @return
      */
-    private EndpointScope createEnpointScope(Annotation an, ExecutableElement javaMethod) {
+    private EndpointScope createEnpointScope(ExecutableElement javaMethod) {
         RequestMethod method = null;
         String path = null;
 
-        if (an instanceof RequestMapping) {
+        Annotation an;
+
+        if ((an = javaMethod.getAnnotation(RequestMapping.class)) != null) {
             var mapping = (RequestMapping) an;
             method = firstOrNull(mapping.method());
             path = firstOrNull(mapping.path());
 
-        } else if (an instanceof GetMapping) {
+        } else if ((an = javaMethod.getAnnotation(GetMapping.class)) != null) {
             method = RequestMethod.GET;
             path = firstOrNull(((GetMapping) an).value());
 
-        } else if (an instanceof PostMapping) {
+        } else if ((an = javaMethod.getAnnotation(PostMapping.class)) != null) {
             method = RequestMethod.POST;
             path = firstOrNull(((PostMapping) an).value());
 
-        } else if (an instanceof PutMapping) {
+        } else if ((an = javaMethod.getAnnotation(PutMapping.class)) != null) {
             method = RequestMethod.PUT;
             path = firstOrNull(((PutMapping) an).value());
 
-        } else if (an instanceof DeleteMapping) {
+        } else if ((an = javaMethod.getAnnotation(DeleteMapping.class)) != null) {
             method = RequestMethod.DELETE;
             path = firstOrNull(((DeleteMapping) an).value());
 
-        } else if (an instanceof PatchMapping) {
+        } else if ((an = javaMethod.getAnnotation(PatchMapping.class)) != null) {
             method = RequestMethod.PATCH;
             path = firstOrNull(((PatchMapping) an).value());
         }
 
-        return new EndpointScope(method, path, javaMethod);
+        var params = javaMethod.getParameters().stream()
+                .map(this::createParameterScope)
+                .collect(toList());
+
+        return new EndpointScope(method, path, javaMethod, params);
     }
-    
+
+    /**
+     * Creates a {@link ParameterScope} object from a particular
+     * {@link VariableElement}.
+     *
+     * @param el
+     * @return
+     */
     private ParameterScope createParameterScope(VariableElement el) {
         var name = el.getSimpleName().toString();
         var type = el.asType();
-        
-        
+
+        ParameterScope.Kind kind = null;
+        boolean required = true;
+        String defaultValue = null;
+        String declaredName = null;
+
+        Annotation an;
+
+        if ((an = el.getAnnotation(PathVariable.class)) != null) {
+            kind = Kind.PATH_VARIABLE;
+            var pan = (PathVariable) an;
+            declaredName = pan.name();
+            required = pan.required();
+
+        } else if ((an = el.getAnnotation(RequestParam.class)) != null) {
+            kind = Kind.QUERY_PARAM;
+            var qan = (RequestParam) an;
+            declaredName = qan.name();
+            required = qan.required();
+            defaultValue = qan.defaultValue();
+
+        } else if ((an = el.getAnnotation(RequestHeader.class)) != null) {
+            kind = Kind.HEADER_PARAM;
+            var han = (RequestHeader) an;
+            declaredName = han.name();
+            required = han.required();
+            defaultValue = han.defaultValue();
+
+        } else if ((an = el.getAnnotation(RequestBody.class)) != null) {
+            kind = Kind.BODY;
+            var ban = (RequestBody) an;
+            declaredName = "body";
+            required = ban.required();
+
+        }
+
+        if (kind == null) {
+            // Without kind, no equest parameter.
+            return null;
+        }
+
+        var nameToUse = declaredName != null ? declaredName : name;
+
+        return new ParameterScope(nameToUse, kind, type, required, defaultValue);
     }
 
     private Writer getWriter(String sourceFileName, Element... originatingElements) throws IOException {
@@ -236,8 +280,23 @@ public class ApiClientMaker extends AbstractProcessor {
                 .addModifiers(PUBLIC, STATIC)
                 .returns(returnType);
 
-        m.addParameter(String[].class, "args")
-                .addStatement("$T.out.println($S)", System.class, "Hello, JavaPoet!");
+        var sb = new StringBuilder();
+
+        // First param is always the serviceUrl...
+        m.addParameter(
+                ClassName.get(String.class),
+                "serviceUrl"
+        );
+
+        sb.append(format("return requestTemplate.get(serviceUrl + %s)", ep.getPath()))
+                .append(format("\t.expect(%s.class)", ep.getReturnType().toString()));
+
+        for (var param : ep.getParams()) {
+            m.addParameter(
+                    TypeName.get(param.getType()),
+                    toLowerCamelCase(param.getName())
+            );
+        }
 
         return m.build();
     }

@@ -23,6 +23,7 @@
  */
 package de.hsesslingen.keim.efs.annotations;
 
+import java.util.List;
 import javax.lang.model.element.ExecutableElement;
 import javax.lang.model.type.TypeMirror;
 import lombok.AllArgsConstructor;
@@ -44,6 +45,7 @@ public class EndpointScope {
     private RequestMethod method;
     private String path;
     private ExecutableElement javaMethod;
+    private List<ParameterScope> params;
 
     public String getMethodName() {
         return javaMethod.getSimpleName().toString();

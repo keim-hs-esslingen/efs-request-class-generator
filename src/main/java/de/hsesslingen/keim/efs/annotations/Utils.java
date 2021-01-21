@@ -32,18 +32,32 @@ public class Utils {
     private Utils() {
     }
 
-    public static String toUpperCamelCase(String methodName) {
-        if (methodName == null || methodName.isEmpty()) {
-            return methodName;
-        }
-
-        var name = methodName.substring(0, 1).toUpperCase();
-
-        if (methodName.length() == 1) {
+    public static String toUpperCamelCase(String name) {
+        if (name == null || name.isEmpty()) {
             return name;
         }
 
-        return name + methodName.substring(1);
+        var result = name.substring(0, 1).toUpperCase();
+
+        if (name.length() == 1) {
+            return result;
+        }
+
+        return result + name.substring(1);
+    }
+
+    public static String toLowerCamelCase(String name) {
+        if (name == null || name.isEmpty()) {
+            return name;
+        }
+
+        var result = name.substring(0, 1).toLowerCase();
+
+        if (name.length() == 1) {
+            return result;
+        }
+
+        return result + name.substring(1);
     }
 
     public static <T> T firstOrNull(T[] array) {

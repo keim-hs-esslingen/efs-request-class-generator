@@ -67,4 +67,11 @@ public class Utils {
         return array[0];
     }
 
+    public static String nullToEmpty(String str) {
+        return str == null ? "" : str;
+    }
+
+    public static String safeConcat(String a, String b) {
+        return nullToEmpty(a) + nullToEmpty(b);
+    }
 }

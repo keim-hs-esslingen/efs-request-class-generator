@@ -23,6 +23,7 @@
  */
 package de.hsesslingen.keim.efs.annotations;
 
+import static de.hsesslingen.keim.efs.annotations.Utils.toUpperCamelCase;
 import java.util.List;
 import javax.lang.model.element.ExecutableElement;
 import javax.lang.model.type.TypeMirror;
@@ -55,4 +56,7 @@ public class EndpointScope {
         return javaMethod.getReturnType();
     }
 
+    public String getRequestClassName() {
+        return toUpperCamelCase(getMethodName()) + "Request";
+    }
 }

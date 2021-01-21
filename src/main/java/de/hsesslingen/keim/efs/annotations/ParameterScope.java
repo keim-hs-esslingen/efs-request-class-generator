@@ -37,16 +37,15 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 public class ParameterScope {
 
+    private String variableName;
     private String name;
     private Kind kind;
     private TypeMirror type;
     private boolean required = true;
     private String defaultValue = null;
 
-    public ParameterScope(String name, Kind kind, TypeMirror type) {
-        this.name = name;
-        this.kind = kind;
-        this.type = type;
+    public boolean hasDefaultValue() {
+        return defaultValue != null;
     }
 
     public static enum Kind {

@@ -83,7 +83,7 @@ public class ApiClientMaker extends AbstractProcessor {
     @Override
     public boolean process(Set<? extends TypeElement> annotations, RoundEnvironment roundEnv) {
         // First read and collect the api scopes together with its endpoint scopes...
-        var apis = annotations.parallelStream()
+        var apis = annotations.stream()
                 .flatMap(a -> roundEnv.getElementsAnnotatedWith(a).stream())
                 .map(el -> (TypeElement) el)
                 .map(el -> createApiScope(el))

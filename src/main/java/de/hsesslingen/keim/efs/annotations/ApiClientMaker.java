@@ -41,8 +41,6 @@ import de.hsesslingen.keim.restutils.AbstractRequest;
 import java.io.IOException;
 import java.io.Writer;
 import java.lang.annotation.Annotation;
-import java.util.HashMap;
-import java.util.Map;
 import java.util.Set;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -76,15 +74,7 @@ import org.springframework.web.bind.annotation.RequestParam;
  *
  * @author ben
  */
-@SupportedAnnotationTypes({
-    "org.springframework.web.bind.annotation.GetMapping",
-    "org.springframework.web.bind.annotation.PostMapping",
-    "org.springframework.web.bind.annotation.PutMapping",
-    "org.springframework.web.bind.annotation.DeleteMapping",
-    "org.springframework.web.bind.annotation.PatchMapping",
-    "org.springframework.web.bind.annotation.RequestMapping"
-
-})
+@SupportedAnnotationTypes("de.hsesslingen.keim.efs.annotations.GenerateRequestClass")
 @SupportedSourceVersion(SourceVersion.RELEASE_14)
 public class ApiClientMaker extends AbstractProcessor {
 
@@ -92,21 +82,16 @@ public class ApiClientMaker extends AbstractProcessor {
 
     @Override
     public boolean process(Set<? extends TypeElement> annotations, RoundEnvironment roundEnv) {
-
-        var apis = new HashMap<String, ApiScope>();
-
         // First read and collect the api scopes together with its endpoint scopes...
-        annotations.stream()
+        var apis = annotations.parallelStream()
                 .flatMap(a -> roundEnv.getElementsAnnotatedWith(a).stream())
-                .filter(el -> el != null && el instanceof ExecutableElement && el.getEnclosingElement() instanceof TypeElement)
-                .map(el -> (ExecutableElement) el)
-                .forEach(ex -> {
-                    var api = getOrCreateApiScope(apis, (TypeElement) ex.getEnclosingElement());
-                    var ep = createEnpointScope(ex);
-                    api.getEndpoints().add(ep);
-                });
+                .map(el -> (TypeElement) el)
+                .map(el -> createApiScope(el))
+                .filter(api -> api != null)
+                .peek(this::collectEndpointScopes)
+                .collect(toList());
 
-        for (var api : apis.values()) {
+        for (var api : apis) {
             try {
                 buildApiClient(api);
             } catch (IOException ex) {
@@ -118,25 +103,34 @@ public class ApiClientMaker extends AbstractProcessor {
     }
 
     /**
+     * Iterates over the executable elements in the type element of this api and
+     * collects the endpoint scopes of the suitable methods.
+     *
+     * @param api
+     */
+    private void collectEndpointScopes(ApiScope api) {
+        api.getTypeElement().getEnclosedElements().stream()
+                .filter(el -> el instanceof ExecutableElement)
+                .map(el -> ((ExecutableElement) el))
+                .map(this::createEnpointScope) // return null if unable to create scope.
+                .filter(ep -> ep != null) // filter null values.
+                .forEach(api.getEndpoints()::add);
+    }
+
+    /**
      * If there is already an {@link ApiScope} for {@link typeEl} in
      * {@link apis} (recognized by simpleName), the element from {@link apis}
      * will be returned. Otherwise an new {@link ApiScope} will be generated
      * based on {@link typeEl}.
      *
-     * @param typeEl
+     * @param typeElement
      * @return
      */
-    private ApiScope getOrCreateApiScope(Map<String, ApiScope> apis, TypeElement typeEl) {
-        var name = typeEl.getSimpleName().toString();
-
-        if (apis.containsKey(name)) {
-            return apis.get(name);
-        }
-
-        var api = new ApiScope().setTypeElement(typeEl);
+    private ApiScope createApiScope(TypeElement typeElement) {
+        var api = new ApiScope().setTypeElement(typeElement);
 
         // If the parent element has a request mapping, we must know the path, if that one is set.
-        var mapping = typeEl.getAnnotation(RequestMapping.class);
+        var mapping = typeElement.getAnnotation(RequestMapping.class);
         if (mapping != null) {
             var path = firstOrNull(mapping.path());
             api.setPath(path);
@@ -154,8 +148,8 @@ public class ApiClientMaker extends AbstractProcessor {
      * @return
      */
     private EndpointScope createEnpointScope(ExecutableElement javaMethod) {
-        RequestMethod method = null;
-        String path = null;
+        RequestMethod method;
+        String path;
 
         Annotation an;
 
@@ -183,6 +177,8 @@ public class ApiClientMaker extends AbstractProcessor {
         } else if ((an = javaMethod.getAnnotation(PatchMapping.class)) != null) {
             method = RequestMethod.PATCH;
             path = firstOrNull(((PatchMapping) an).value());
+        } else {
+            return null;
         }
 
         // First create a list of ParameterScopes...

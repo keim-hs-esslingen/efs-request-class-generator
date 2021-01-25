@@ -21,18 +21,21 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
-package de.hsesslingen.keim.efs.annotations;
+package de.hsesslingen.keim.efs.annotations.javapoet;
 
 import com.squareup.javapoet.ClassName;
-import com.squareup.javapoet.FieldSpec;
 import com.squareup.javapoet.JavaFile;
 import com.squareup.javapoet.MethodSpec;
-import com.squareup.javapoet.ParameterSpec;
-import com.squareup.javapoet.ParameterizedTypeName;
-import com.squareup.javapoet.TypeName;
 import com.squareup.javapoet.TypeSpec;
+import de.hsesslingen.keim.efs.annotations.ApiScope;
+import de.hsesslingen.keim.efs.annotations.EndpointScope;
+import de.hsesslingen.keim.efs.annotations.ParameterScope;
+import static de.hsesslingen.keim.efs.annotations.javapoet.FieldSpecUtils.*;
+import static de.hsesslingen.keim.efs.annotations.javapoet.ParameterSpecUtils.*;
 import static de.hsesslingen.keim.efs.annotations.ParameterScope.Kind.PATH_VARIABLE;
 import static de.hsesslingen.keim.efs.annotations.Utils.safeConcat;
+import static de.hsesslingen.keim.efs.annotations.javapoet.MethodSpecUtils.methodSpec;
+import static de.hsesslingen.keim.efs.annotations.javapoet.TypeNameUtils.*;
 import de.hsesslingen.keim.restutils.AbstractRequest;
 import java.io.IOException;
 import javax.annotation.processing.Filer;
@@ -72,10 +75,6 @@ public class JavaPoetRequestClassBuilder {
                 });
     }
 
-    private FieldSpec createParameterField(ParameterScope pv) {
-        return FieldSpec.builder(TypeName.get(pv.getType()), pv.getVariableName(), PRIVATE).build();
-    }
-
     private MethodSpec createConstructor(EndpointScope ep) {
         var m = MethodSpec.constructorBuilder()
                 .addModifiers(PUBLIC)
@@ -93,7 +92,7 @@ public class JavaPoetRequestClassBuilder {
                             .append(ps.getVariableName())
                             .append(";\n");
                 })
-                .map(ps -> ParameterSpec.builder(TypeName.get(ps.getType()), ps.getVariableName()).build()).
+                .map(ps -> paramSpec(ps.getType(), ps.getVariableName())).
                 forEach(m::addParameter);
 
         m.addCode(sb.toString());
@@ -101,40 +100,27 @@ public class JavaPoetRequestClassBuilder {
     }
 
     private MethodSpec createParameterMethod(ClassName returnType, ParameterScope ps) {
-        var m = MethodSpec.methodBuilder(ps.getVariableName())
-                .addModifiers(PUBLIC)
-                .returns(returnType);
-
-        m.addParameter(TypeName.get(ps.getType()), ps.getVariableName());
-
-        m
+        return methodSpec(ps.getVariableName(), PUBLIC)
+                .returns(returnType)
+                .addParameter(paramSpec(ps.getType(), ps.getVariableName()))
                 .addStatement("this." + ps.getVariableName() + " = " + ps.getVariableName())
-                .addStatement("return this");
-
-        return m.build();
+                .addStatement("return this")
+                .build();
     }
 
     private MethodSpec createGoMethodWithRestTemplate(EndpointScope ep) {
-        return MethodSpec.methodBuilder("go")
-                .addModifiers(PUBLIC)
-                .returns(ParameterizedTypeName.get(
-                        ClassName.get(ResponseEntity.class),
-                        TypeName.get(ep.getReturnType())
-                ))
-                .addParameter(ParameterSpec.builder(ClassName.get(RestTemplate.class), "restTemplate").build())
+        return methodSpec("go", PUBLIC)
+                .returns(paramsTypeName(ResponseEntity.class, ep.getReturnType()))
+                .addParameter(paramSpec(RestTemplate.class, "restTemplate"))
                 .addStatement("this.restTemplate = restTemplate")
                 .addStatement("return this.go()")
                 .build();
     }
 
     private MethodSpec createGoOverrideMethod(EndpointScope ep) {
-        var m = MethodSpec.methodBuilder("go")
-                .addModifiers(PUBLIC)
+        var m = methodSpec("go", PUBLIC)
                 .addAnnotation(Override.class)
-                .returns(ParameterizedTypeName.get(
-                        ClassName.get(ResponseEntity.class),
-                        TypeName.get(ep.getReturnType())
-                ));
+                .returns(paramsTypeName(ResponseEntity.class, ep.getReturnType()));
 
         var sb = new StringBuilder()
                 .append("var path = pathTemplate\n");
@@ -243,26 +229,24 @@ public class JavaPoetRequestClassBuilder {
         var t = TypeSpec.classBuilder(className).addModifiers(PUBLIC, FINAL);
 
         // Create parent type as AbstractRequest<T>, where T is the return type of the endpoint.
-        t.superclass(ParameterizedTypeName.get(
-                ClassName.get(AbstractRequest.class),
-                TypeName.get(ep.getReturnType())
-        ));
+        t.superclass(paramsTypeName(AbstractRequest.class, ep.getReturnType()));
 
         // concatenate api and endpoint path to get full pathTemplate for this endpoint.
         var pathTemplate = safeConcat(api.getPath(), ep.getPath());
 
         // Add common fields...
-        t.addField(FieldSpec.builder(STRING, "baseUrl", PRIVATE, FINAL).build());
-        t.addField(FieldSpec.builder(STRING, "pathTemplate", PRIVATE, FINAL).initializer("\"" + pathTemplate + "\"").build());
-        t.addField(FieldSpec.builder(ClassName.get(RestTemplate.class), "restTemplate", PRIVATE).build());
+        t.addField(fieldSpec(STRING, "baseUrl", PRIVATE, FINAL));
+        t.addField(fieldSpecBldr(STRING, "pathTemplate", PRIVATE, FINAL).initializer("\"" + pathTemplate + "\"").build());
+        t.addField(fieldSpec(RestTemplate.class, "restTemplate", PRIVATE));
 
         // Add a storage field for each param...
         ep.getParams().stream()
-                .map(this::createParameterField)
+                .map(ps -> fieldSpec(ps.getType(), ps.getVariableName(), PRIVATE))
                 .forEach(t::addField);
 
         t.addMethod(createConstructor(ep));
         t.addMethod(createGetRestTemplateOverride());
+
         // Make builder style methods for each param.
         ep.getParams().stream()
                 .filter(ps -> !ps.isRequired()) // Required values are set in constructor.

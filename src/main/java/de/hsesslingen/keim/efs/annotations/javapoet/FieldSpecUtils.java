@@ -21,34 +21,51 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
-package de.hsesslingen.keim.efs.annotations;
+package de.hsesslingen.keim.efs.annotations.javapoet;
 
 import com.squareup.javapoet.ClassName;
 import com.squareup.javapoet.FieldSpec;
 import com.squareup.javapoet.TypeName;
 import java.lang.reflect.Type;
 import javax.lang.model.element.Modifier;
+import javax.lang.model.type.TypeMirror;
 
 /**
  *
  * @author ben
  */
-public class JavaPoetUtils {
+public class FieldSpecUtils {
+
+    public static FieldSpec.Builder fieldSpecBldr(Type type, String name, Modifier... modifiers) {
+        return FieldSpec.builder(type, name, modifiers);
+    }
+
+    public static FieldSpec.Builder fieldSpecBldr(TypeName type, String name, Modifier... modifiers) {
+        return FieldSpec.builder(type, name, modifiers);
+    }
+
+    public static FieldSpec.Builder fieldSpecBldr(Class<?> clazz, String name, Modifier... modifiers) {
+        return fieldSpecBldr(ClassName.get(clazz), name, modifiers);
+    }
+
+    public static FieldSpec.Builder fieldSpecBldr(TypeMirror type, String name, Modifier... modifiers) {
+        return fieldSpecBldr(TypeName.get(type), name, modifiers);
+    }
 
     public static FieldSpec fieldSpec(Type type, String name, Modifier... modifiers) {
-        return FieldSpec.builder(type, name, modifiers).build();
+        return fieldSpecBldr(type, name, modifiers).build();
     }
 
     public static FieldSpec fieldSpec(TypeName type, String name, Modifier... modifiers) {
-        return FieldSpec.builder(type, name, modifiers).build();
-    }
-
-    public static FieldSpec fieldSpec(ClassName className, String name, Modifier... modifiers) {
-        return FieldSpec.builder(className, name, modifiers).build();
+        return fieldSpecBldr(type, name, modifiers).build();
     }
 
     public static FieldSpec fieldSpec(Class<?> clazz, String name, Modifier... modifiers) {
         return fieldSpec(ClassName.get(clazz), name, modifiers);
+    }
+
+    public static FieldSpec fieldSpec(TypeMirror type, String name, Modifier... modifiers) {
+        return fieldSpec(TypeName.get(type), name, modifiers);
     }
 
 }

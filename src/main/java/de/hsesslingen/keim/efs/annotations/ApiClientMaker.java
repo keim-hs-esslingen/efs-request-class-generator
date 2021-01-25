@@ -23,6 +23,7 @@
  */
 package de.hsesslingen.keim.efs.annotations;
 
+import de.hsesslingen.keim.efs.annotations.javapoet.JavaPoetRequestClassBuilder;
 import de.hsesslingen.keim.efs.annotations.ParameterScope.Kind;
 import static de.hsesslingen.keim.efs.annotations.Utils.*;
 import java.io.IOException;

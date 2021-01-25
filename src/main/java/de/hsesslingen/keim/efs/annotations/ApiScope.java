@@ -53,4 +53,8 @@ public class ApiScope {
     public String getApiClassName() {
         return typeElement.getSimpleName().toString();
     }
+    
+    public String getApiRequestsClassName() {
+        return getApiClassName() + "Requests";
+    }
 }

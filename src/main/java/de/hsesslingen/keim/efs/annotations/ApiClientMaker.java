@@ -39,24 +39,20 @@ import static de.hsesslingen.keim.efs.annotations.ParameterScope.Kind.QUERY_PARA
 import static de.hsesslingen.keim.efs.annotations.Utils.*;
 import de.hsesslingen.keim.restutils.AbstractRequest;
 import java.io.IOException;
-import java.io.Writer;
 import java.lang.annotation.Annotation;
 import java.util.Set;
-import java.util.logging.Level;
-import java.util.logging.Logger;
 import static java.util.stream.Collectors.toList;
 import javax.annotation.processing.AbstractProcessor;
-import javax.annotation.processing.Filer;
 import javax.annotation.processing.RoundEnvironment;
 import javax.annotation.processing.SupportedAnnotationTypes;
 import javax.annotation.processing.SupportedSourceVersion;
 import javax.lang.model.SourceVersion;
-import javax.lang.model.element.Element;
 import javax.lang.model.element.ExecutableElement;
 import static javax.lang.model.element.Modifier.*;
 import javax.lang.model.element.TypeElement;
 import javax.lang.model.element.VariableElement;
-import javax.tools.JavaFileObject;
+import javax.tools.Diagnostic;
+import static javax.tools.Diagnostic.Kind.*;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -80,8 +76,31 @@ public class ApiClientMaker extends AbstractProcessor {
 
     private static final ClassName STRING = ClassName.get(String.class);
 
+    public void log(Diagnostic.Kind kind, String message) {
+        processingEnv.getMessager().printMessage(kind, message);
+    }
+
+    public void logNote(String message) {
+        processingEnv.getMessager().printMessage(NOTE, message);
+    }
+
+    public void logWarn(String message) {
+        processingEnv.getMessager().printMessage(WARNING, message);
+    }
+
+    public void logError(String message) {
+        processingEnv.getMessager().printMessage(ERROR, message);
+    }
+
     @Override
     public boolean process(Set<? extends TypeElement> annotations, RoundEnvironment roundEnv) {
+        if (annotations.isEmpty()) {
+            return false;
+        }
+
+        logNote("Started processing of @GeneratedRequestClass annotations.");
+
+        logNote("Started collecting endpoints.");
         // First read and collect the api scopes together with its endpoint scopes...
         var apis = annotations.stream()
                 .flatMap(a -> roundEnv.getElementsAnnotatedWith(a).stream())
@@ -91,15 +110,17 @@ public class ApiClientMaker extends AbstractProcessor {
                 .peek(this::collectEndpointScopes)
                 .collect(toList());
 
+        logNote("Started generating request classes.");
         for (var api : apis) {
             try {
                 buildApiClient(api);
             } catch (IOException ex) {
-                Logger.getLogger(ApiClientMaker.class.getName()).log(Level.SEVERE, null, ex);
+                logError("An exception occured:\n");
+                logError(ex.getMessage());
             }
         }
 
-        return false; // Do not prevent calling of other processors.
+        return false;
     }
 
     /**
@@ -246,14 +267,8 @@ public class ApiClientMaker extends AbstractProcessor {
         return new ParameterScope(varName, nameToUse, kind, type, required, defaultValue);
     }
 
-    private Writer getWriter(String sourceFileName, Element... originatingElements) throws IOException {
-        Filer filer = processingEnv.getFiler();
-        JavaFileObject fileObject = filer.createSourceFile(sourceFileName, originatingElements);
-        return fileObject.openWriter();
-    }
-
     private void buildApiClient(ApiScope api) throws IOException {
-        var clientClassName = api.getApiClassName() + "Requests";
+        var clientClassName = api.getApiRequestsClassName();
 
         var classBldr = TypeSpec.classBuilder(clientClassName)
                 .addModifiers(PUBLIC, FINAL);
@@ -267,9 +282,13 @@ public class ApiClientMaker extends AbstractProcessor {
         var javaFile = JavaFile.builder(api.getApiPackageName(), classTypeSpec)
                 .build();
 
-        var writer = getWriter(api.getApiPackageName() + "." + clientClassName, api.getTypeElement());
-
-        javaFile.writeTo(writer);
+        try {
+            //javaFile.writeTo(System.out);
+            javaFile.writeTo(processingEnv.getFiler());
+        } catch (IOException ex) {
+            logError(ex.getMessage());
+            throw ex;
+        }
     }
 
     private FieldSpec createParameterField(ParameterScope pv) {
@@ -279,6 +298,7 @@ public class ApiClientMaker extends AbstractProcessor {
 
     private MethodSpec createConstructor(EndpointScope ep) {
         var m = MethodSpec.constructorBuilder()
+                .addModifiers(PUBLIC)
                 .addParameter(STRING, "baseUrl");
 
         var sb = new StringBuilder()
@@ -308,8 +328,8 @@ public class ApiClientMaker extends AbstractProcessor {
         m.addParameter(TypeName.get(ps.getType()), ps.getVariableName());
 
         m
-                .addStatement("this." + ps.getVariableName() + " = " + ps.getVariableName() + ";\n")
-                .addStatement("return this;");
+                .addStatement("this." + ps.getVariableName() + " = " + ps.getVariableName())
+                .addStatement("return this");
 
         return m.build();
     }
@@ -353,7 +373,7 @@ public class ApiClientMaker extends AbstractProcessor {
         }
 
         // Add uri setter with baseUrl and path...
-        sb.append(";\nsuper.uri(baseUrl + path);\n\n");
+        sb.append("\t;\n\nsuper.uri(baseUrl + path);\n\n");
 
         // Add rest of params (non-path-variables)...
         for (var ps : ep.getParams()) {
@@ -404,7 +424,7 @@ public class ApiClientMaker extends AbstractProcessor {
                 // Inject expected type reference...
                 .append("super.expect(new org.springframework.core.ParameterizedTypeReference<")
                 .append(ep.getReturnType().toString())
-                .append(">() {});")
+                .append(">() {});\n\n")
                 // Call go...
                 .append("return super.go();");
 
@@ -413,8 +433,8 @@ public class ApiClientMaker extends AbstractProcessor {
     }
 
     private TypeSpec createRequestClass(ApiScope api, EndpointScope ep) {
-        var className = ClassName.get(api.getApiPackageName(), api.getApiClassName(), ep.getRequestClassName());
-        var t = TypeSpec.classBuilder(className);
+        var className = ClassName.get(api.getApiPackageName(), api.getApiRequestsClassName(), ep.getRequestClassName());
+        var t = TypeSpec.classBuilder(className).addModifiers(PUBLIC, STATIC, FINAL);
 
         // Create parent type as AbstractRequest<T>, where T is the return type of the endpoint.
         t.superclass(ParameterizedTypeName.get(
@@ -427,7 +447,7 @@ public class ApiClientMaker extends AbstractProcessor {
 
         // Add common fields...
         t.addField(FieldSpec.builder(STRING, "baseUrl", PRIVATE).build());
-        t.addField(FieldSpec.builder(STRING, "pathTemplate", PRIVATE).initializer(" = %s;", pathTemplate).build());
+        t.addField(FieldSpec.builder(STRING, "pathTemplate", PRIVATE).initializer("\"" + pathTemplate + "\"").build());
 
         // Add a storage field for each param...
         ep.getParams().stream()

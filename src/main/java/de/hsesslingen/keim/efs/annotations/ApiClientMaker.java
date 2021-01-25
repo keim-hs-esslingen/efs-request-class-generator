@@ -65,6 +65,7 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.client.RestTemplate;
 
 /**
  *
@@ -268,27 +269,21 @@ public class ApiClientMaker extends AbstractProcessor {
     }
 
     private void buildApiClient(ApiScope api) throws IOException {
-        var clientClassName = api.getApiRequestsClassName();
-
-        var classBldr = TypeSpec.classBuilder(clientClassName)
-                .addModifiers(PUBLIC, FINAL);
-
         api.getEndpoints().stream()
-                .map(ep -> createRequestClass(api, ep))
-                .forEach(classBldr::addType);
+                .forEach(ep -> {
+                    var spec = createRequestClass(api, ep);
 
-        var classTypeSpec = classBldr.build();
+                    var javaFile = JavaFile.builder(api.getApiRequestClassPackageName(), spec)
+                            .build();
 
-        var javaFile = JavaFile.builder(api.getApiPackageName(), classTypeSpec)
-                .build();
-
-        try {
-            //javaFile.writeTo(System.out);
-            javaFile.writeTo(processingEnv.getFiler());
-        } catch (IOException ex) {
-            logError(ex.getMessage());
-            throw ex;
-        }
+                    try {
+                        javaFile.writeTo(System.out);
+                        javaFile.writeTo(processingEnv.getFiler());
+                    } catch (IOException ex) {
+                        logError(ex.getMessage());
+                        throw new RuntimeException(ex);
+                    }
+                });
     }
 
     private FieldSpec createParameterField(ParameterScope pv) {
@@ -332,6 +327,19 @@ public class ApiClientMaker extends AbstractProcessor {
                 .addStatement("return this");
 
         return m.build();
+    }
+
+    private MethodSpec createGoMethodWithRestTemplate(EndpointScope ep) {
+        return MethodSpec.methodBuilder("go")
+                .addModifiers(PUBLIC)
+                .returns(ParameterizedTypeName.get(
+                        ClassName.get(ResponseEntity.class),
+                        TypeName.get(ep.getReturnType())
+                ))
+                .addParameter(ParameterSpec.builder(ClassName.get(RestTemplate.class), "restTemplate").build())
+                .addStatement("this.restTemplate = restTemplate")
+                .addStatement("return this.go()")
+                .build();
     }
 
     private MethodSpec createGoOverrideMethod(EndpointScope ep) {
@@ -432,9 +440,22 @@ public class ApiClientMaker extends AbstractProcessor {
         return m.build();
     }
 
+    private MethodSpec createGetRestTemplateOverride() {
+        return MethodSpec.methodBuilder("getRestTemplate")
+                .addModifiers(PROTECTED)
+                .addAnnotation(Override.class)
+                .returns(ClassName.get(RestTemplate.class))
+                .addCode("if(this.restTemplate == null){\n"
+                        + "\treturn super.getRestTemplate();\n"
+                        + "}\n"
+                        + "return this.restTemplate;\n"
+                )
+                .build();
+    }
+
     private TypeSpec createRequestClass(ApiScope api, EndpointScope ep) {
-        var className = ClassName.get(api.getApiPackageName(), api.getApiRequestsClassName(), ep.getRequestClassName());
-        var t = TypeSpec.classBuilder(className).addModifiers(PUBLIC, STATIC, FINAL);
+        var className = ClassName.get(api.getApiRequestClassPackageName(), ep.getRequestClassName());
+        var t = TypeSpec.classBuilder(className).addModifiers(PUBLIC, FINAL);
 
         // Create parent type as AbstractRequest<T>, where T is the return type of the endpoint.
         t.superclass(ParameterizedTypeName.get(
@@ -448,6 +469,7 @@ public class ApiClientMaker extends AbstractProcessor {
         // Add common fields...
         t.addField(FieldSpec.builder(STRING, "baseUrl", PRIVATE, FINAL).build());
         t.addField(FieldSpec.builder(STRING, "pathTemplate", PRIVATE, FINAL).initializer("\"" + pathTemplate + "\"").build());
+        t.addField(FieldSpec.builder(ClassName.get(RestTemplate.class), "restTemplate", PRIVATE).build());
 
         // Add a storage field for each param...
         ep.getParams().stream()
@@ -455,7 +477,7 @@ public class ApiClientMaker extends AbstractProcessor {
                 .forEach(t::addField);
 
         t.addMethod(createConstructor(ep));
-
+        t.addMethod(createGetRestTemplateOverride());
         // Make builder style methods for each param.
         ep.getParams().stream()
                 .filter(ps -> !ps.isRequired()) // Required values are set in constructor.
@@ -464,6 +486,7 @@ public class ApiClientMaker extends AbstractProcessor {
 
         // Add essential go method override.
         t.addMethod(createGoOverrideMethod(ep));
+        t.addMethod(createGoMethodWithRestTemplate(ep));
 
         return t.build();
     }

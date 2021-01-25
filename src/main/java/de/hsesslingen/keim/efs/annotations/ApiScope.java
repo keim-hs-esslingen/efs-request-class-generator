@@ -49,6 +49,9 @@ public class ApiScope {
     public String getApiPackageName() {
         return ((PackageElement) typeElement.getEnclosingElement()).getQualifiedName().toString();
     }
+    public String getApiRequestClassPackageName() {
+        return getApiPackageName() + "." + getApiClassName() + "Requests";
+    }
 
     public String getApiClassName() {
         return typeElement.getSimpleName().toString();

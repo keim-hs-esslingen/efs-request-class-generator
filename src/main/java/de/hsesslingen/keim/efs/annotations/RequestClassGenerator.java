@@ -58,7 +58,7 @@ import org.springframework.web.bind.annotation.RequestParam;
  */
 @SupportedAnnotationTypes("de.hsesslingen.keim.efs.annotations.GenerateRequestClass")
 @SupportedSourceVersion(SourceVersion.RELEASE_14)
-public class ApiClientMaker extends AbstractProcessor {
+public class RequestClassGenerator extends AbstractProcessor {
 
     public void log(Diagnostic.Kind kind, String message) {
         processingEnv.getMessager().printMessage(kind, message);

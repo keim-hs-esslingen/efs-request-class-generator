@@ -28,7 +28,7 @@ import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.ResponseEntity;
 
 /**
- *
+ * Just a template class with no direct use.
  * @author ben
  */
 public final class RequestClassTemplate<T, B> extends AbstractRequest<T> {

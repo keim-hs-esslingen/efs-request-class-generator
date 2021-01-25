@@ -446,8 +446,8 @@ public class ApiClientMaker extends AbstractProcessor {
         var pathTemplate = safeConcat(api.getPath(), ep.getPath());
 
         // Add common fields...
-        t.addField(FieldSpec.builder(STRING, "baseUrl", PRIVATE).build());
-        t.addField(FieldSpec.builder(STRING, "pathTemplate", PRIVATE).initializer("\"" + pathTemplate + "\"").build());
+        t.addField(FieldSpec.builder(STRING, "baseUrl", PRIVATE, FINAL).build());
+        t.addField(FieldSpec.builder(STRING, "pathTemplate", PRIVATE, FINAL).initializer("\"" + pathTemplate + "\"").build());
 
         // Add a storage field for each param...
         ep.getParams().stream()
